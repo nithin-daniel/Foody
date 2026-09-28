@@ -37,3 +37,192 @@ td.n,th.n{text-align:left;padding-left:12px;font-weight:600;white-space:nowrap}
 td.t{font-weight:800;color:var(--leaf)}
 tfoot td{background:var(--head);font-weight:800;border-bottom:0}
 .chips{display:inline-flex;gap:3px}
+.chip{width:26px;height:26px;border-radius:7px;border:1.5px solid var(--line);background:transparent;color:var(--mute);font-size:.72rem;font-weight:700;cursor:pointer;padding:0}
+.chip.on{background:var(--on);border-color:var(--on);color:var(--onink)}
+.del{border:0;background:none;color:var(--mute);cursor:pointer;font-size:1rem}
+.empty{padding:22px;color:var(--mute);text-align:center}
+.hint{color:var(--mute);font-size:.8rem;margin-top:8px}
+.noshot .del{display:none}
+td.n,th.n{position:sticky;left:0;background:var(--card);z-index:1}
+th.n,tfoot td.n{background:var(--head)}
+td.n small{color:var(--mute);font-weight:400;margin-left:4px}
+th.p{min-width:108px}
+#ov{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;padding:16px;z-index:9}
+#ov .box{background:var(--card);border-radius:14px;padding:14px;max-width:560px;width:100%;max-height:100%;overflow:auto}
+#ov img{width:100%;border-radius:8px;border:1px solid var(--line);display:block}
+#ov p{margin:0 0 10px;font-size:.9rem;color:var(--mute)}
+#ov .row{display:flex;gap:8px;margin-top:10px}#ov .row .btn{flex:1}
+</style>
+</head>
+<body>
+<h1>Fooody</h1>
+<p class="sub">Tap B, L or D on a day when that meal was eaten.</p>
+
+<div class="prices" id="prices">
+  <b>Price per meal</b>
+  <label>Breakfast <input type="number" min="0" inputmode="decimal" data-k="b"></label>
+  <label>Lunch <input type="number" min="0" inputmode="decimal" data-k="l"></label>
+  <label>Dinner <input type="number" min="0" inputmode="decimal" data-k="d"></label>
+</div>
+
+<div class="bar">
+  <button class="btn" id="prev" aria-label="Previous week">&larr;</button>
+  <span class="wk" id="wk"></span>
+  <button class="btn" id="next" aria-label="Next week">&rarr;</button>
+  <button class="btn" id="today">This week</button>
+  <button class="btn p" id="share" style="margin-left:auto">Share image</button>
+</div>
+
+<form class="bar add" id="addf" onsubmit="return false">
+  <input id="nm" placeholder="Add a name" maxlength="30">
+  <button class="btn" id="addb" type="button">Add</button>
+</form>
+
+<div id="capture">
+  <div class="ct"><span id="cap"></span><b id="gt"></b></div>
+  <div class="wrap"><table id="tb"></table></div>
+</div>
+<div id="ov"><div class="box"><p>Press and hold the image to save or share it, or use the buttons.</p><img id="shotimg" alt="Fooody timetable"><div class="row"><button class="btn p" id="ovsave">Save</button><button class="btn p" id="ovshare">Share</button><button class="btn" id="ovx">Close</button></div><a class="btn p" id="wa" target="_blank" rel="noopener" style="display:block;text-align:center;margin-top:8px;text-decoration:none">Send timetable to WhatsApp (text)</a></div></div>
+<p class="hint">Saved on this device. Changing a price updates all weeks.</p>
+
+<script>
+var DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],MEALS=['b','l','d'],ML={b:'B',l:'L',d:'D'};
+var KEY='fooody-v1',S={prices:{b:0,l:0,d:0},people:[],weeks:{}};
+try{var raw=localStorage.getItem(KEY);if(raw)S=Object.assign(S,JSON.parse(raw))}catch(e){}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+function mon(d){d=new Date(d);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7));return d}
+var cur=mon(new Date());
+function key(d){return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate()}
+function fmt(d){return d.toLocaleDateString(undefined,{day:'numeric',month:'short'})}
+function day(i){var d=new Date(cur);d.setDate(d.getDate()+i);return d}
+function money(n){return (Math.round(n*100)/100).toLocaleString()}
+function wk(){return S.weeks[key(cur)]||(S.weeks[key(cur)]={})}
+function has(n,i,m){var w=(S.weeks[key(cur)]||{})[n];return !!(w&&w[i]&&w[i].indexOf(m)>-1)}
+function toggle(n,i,m){var w=wk();w[n]=w[n]||{};var s=w[n][i]||'';w[n][i]=s.indexOf(m)>-1?s.replace(m,''):s+m;save();render()}
+function cost(s){var t=0;(s||'').split('').forEach(function(m){t+=+S.prices[m]||0});return t}
+function render(){
+  document.getElementById('wk').textContent=fmt(cur)+' – '+fmt(day(6));
+  document.getElementById('cap').textContent='Week of '+fmt(cur)+' to '+fmt(day(6))+', '+cur.getFullYear();
+  var h='<thead><tr><th class="n">Day</th>';
+  S.people.forEach(function(n,pi){h+='<th class="p">'+esc(n)+' <button class="del" data-del="'+pi+'" aria-label="Remove '+esc(n)+'">×</button></th>'});
+  h+='<th>Total</th></tr></thead><tbody>';
+  var pt=S.people.map(function(){return 0}),gt=0;
+  if(!S.people.length)h+='<tr><td class="empty" colspan="3">Add a name above to start tracking.</td></tr>';
+  else for(var i=0;i<7;i++){
+    var dt=0;h+='<tr><td class="n">'+DAYS[i]+'<small>'+day(i).getDate()+'</small></td>';
+    S.people.forEach(function(n,pi){
+      h+='<td><span class="chips">';
+      MEALS.forEach(function(m){var on=has(n,i,m);if(on){var c=+S.prices[m]||0;dt+=c;pt[pi]+=c}
+        h+='<button class="chip'+(on?' on':'')+'" data-n="'+pi+'" data-i="'+i+'" data-m="'+m+'" aria-pressed="'+on+'" aria-label="'+esc(n)+' '+DAYS[i]+' '+m+'">'+ML[m]+'</button>'});
+      h+='</span></td>';
+    });
+    gt+=dt;h+='<td class="t">'+money(dt)+'</td></tr>';
+  }
+  h+='</tbody><tfoot><tr><td class="n">Total</td>';
+  pt.forEach(function(x){h+='<td>'+money(x)+'</td>'});
+  h+='<td>'+money(gt)+'</td></tr></tfoot>';
+  document.getElementById('tb').innerHTML=h;
+  document.getElementById('gt').textContent='Total '+money(gt);
+}
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+document.getElementById('tb').addEventListener('click',function(e){
+  var b=e.target.closest('button');if(!b)return;
+  if(b.dataset.del!==undefined){var n=S.people[+b.dataset.del];if(confirm('Remove '+n+' and their records?')){S.people.splice(+b.dataset.del,1);Object.keys(S.weeks).forEach(function(k){delete S.weeks[k][n]});save();render()}return}
+  if(b.dataset.m)toggle(S.people[+b.dataset.n],+b.dataset.i,b.dataset.m);
+});
+function add(){var el=document.getElementById('nm'),v=el.value.trim();if(!v)return;
+  if(S.people.some(function(p){return p.toLowerCase()===v.toLowerCase()})){el.select();return}
+  S.people.push(v);el.value='';save();render()}
+document.getElementById('addb').onclick=add;
+document.getElementById('nm').addEventListener('keydown',function(e){if(e.key==='Enter')add()});
+document.querySelectorAll('#prices input').forEach(function(i){
+  i.value=S.prices[i.dataset.k]||'';
+  i.oninput=function(){S.prices[i.dataset.k]=parseFloat(i.value)||0;save();render()}});
+document.getElementById('prev').onclick=function(){cur.setDate(cur.getDate()-7);render()};
+document.getElementById('next').onclick=function(){cur.setDate(cur.getDate()+7);render()};
+document.getElementById('today').onclick=function(){cur=mon(new Date());render()};
+function drawImage(){
+  var cs=getComputedStyle(document.documentElement),v=function(n){return cs.getPropertyValue(n).trim()||'#000'};
+  var bg=getComputedStyle(document.body).backgroundColor,card=v('--card'),ink=v('--ink'),mute=v('--mute'),line=v('--line'),leaf=v('--leaf'),on=v('--on'),onink=v('--onink'),head=v('--head');
+  var F='"Bricolage Grotesque",system-ui,-apple-system,Segoe UI,sans-serif';
+  var NW=90,PW=104,TW=84,P=20,RH=44,HH=48,TH=64,n=Math.max(S.people.length,1);
+  var W=Math.max(P*2+NW+PW*n+TW,420),H=P*2+TH+HH+RH*8;
+  var sc=2,c=document.createElement('canvas');c.width=W*sc;c.height=H*sc;
+  var x=c.getContext('2d');x.scale(sc,sc);
+  function rr(px,py,w,h,r,fill,stroke){x.beginPath();x.moveTo(px+r,py);x.arcTo(px+w,py,px+w,py+h,r);x.arcTo(px+w,py+h,px,py+h,r);x.arcTo(px,py+h,px,py,r);x.arcTo(px,py,px+w,py,r);x.closePath();if(fill){x.fillStyle=fill;x.fill()}if(stroke){x.strokeStyle=stroke;x.lineWidth=1;x.stroke()}}
+  function tx(t,px,py,font,col,al){x.font=font;x.fillStyle=col;x.textAlign=al||'left';x.textBaseline='middle';x.fillText(t,px,py)}
+  x.fillStyle=bg;x.fillRect(0,0,W,H);
+  var gt=0,pt=S.people.map(function(){return 0}),dt=[0,0,0,0,0,0,0];
+  S.people.forEach(function(nm,r){for(var i=0;i<7;i++)MEALS.forEach(function(m){if(has(nm,i,m)){var q=+S.prices[m]||0;pt[r]+=q;dt[i]+=q;gt+=q}})});
+  tx('Fooody',P,P+16,'800 26px '+F,leaf);
+  tx(document.getElementById('cap').textContent,P,P+46,'400 14px '+F,mute);
+  tx('Total '+money(gt),W-P,P+22,'800 20px '+F,leaf,'right');
+  var ty=P+TH,tw=W-P*2,th=HH+RH*8,tc=P+NW+PW*S.people.length+TW/2;
+  rr(P,ty,tw,th,10,card,line);
+  x.save();x.beginPath();x.rect(P,ty,tw,th);x.clip();
+  x.fillStyle=head;x.fillRect(P,ty,tw,HH);
+  tx('Day',P+12,ty+HH/2,'600 14px '+F,ink);
+  S.people.forEach(function(nm,r){var t=nm.length>12?nm.slice(0,11)+'…':nm;tx(t,P+NW+PW*r+PW/2,ty+HH/2,'600 14px '+F,ink,'center')});
+  tx('Total',tc,ty+HH/2,'600 14px '+F,ink,'center');
+  if(!S.people.length)tx('No names added yet',P+tw/2,ty+HH+RH*3.5,'400 14px '+F,mute,'center');
+  for(var i=0;i<7;i++){
+    var y=ty+HH+RH*i;x.fillStyle=line;x.fillRect(P,y,tw,1);
+    tx(DAYS[i]+' '+day(i).getDate(),P+12,y+RH/2,'600 14px '+F,ink);
+    S.people.forEach(function(nm,r){MEALS.forEach(function(m,k){var bx=P+NW+PW*r+(PW-80)/2+k*28,by=y+(RH-24)/2,o=has(nm,i,m);
+      rr(bx,by,24,24,6,o?on:null,o?on:line);tx(ML[m],bx+12,by+13,'700 11px '+F,o?onink:mute,'center')})});
+    if(S.people.length)tx(money(dt[i]),tc,y+RH/2,'800 14px '+F,leaf,'center');
+  }
+  var fy=ty+HH+RH*7;
+  x.fillStyle=head;x.fillRect(P,fy,tw,RH);
+  tx('Total',P+12,fy+RH/2,'800 15px '+F,ink);
+  S.people.forEach(function(nm,r){tx(money(pt[r]),P+NW+PW*r+PW/2,fy+RH/2,'800 14px '+F,ink,'center')});
+  tx(money(gt),tc,fy+RH/2,'800 15px '+F,ink,'center');
+  x.restore();
+  return c;
+}
+var shot=null;
+function fail(m){alert(m)}
+function closeOv(){document.getElementById('ov').style.display='none'}
+document.getElementById('share').onclick=function(){
+  var c;
+  try{c=drawImage()}catch(e){fail('Could not draw the image: '+e.message);return}
+  document.getElementById('shotimg').src=c.toDataURL('image/png');
+  c.toBlob(function(bl){shot=bl},'image/png');
+  document.getElementById('wa').href='https://wa.me/?text='+encodeURIComponent(waText());
+  document.getElementById('ov').style.display='flex';
+};
+function waText(){
+  var pad=function(t,w){t=String(t);while(t.length<w)t+=' ';return t};
+  var ws=S.people.map(function(n){return Math.max(n.length,3)});
+  var pt=S.people.map(function(){return 0}),g=0;
+  var head=pad('Day',5)+S.people.map(function(n,k){return pad(n,ws[k]+1)}).join('')+'Total',rows=[];
+  for(var i=0;i<7;i++){
+    var r=pad(DAYS[i],5),dt=0;
+    S.people.forEach(function(n,k){var c='';MEALS.forEach(function(m){if(has(n,i,m)){c+=ML[m];var q=+S.prices[m]||0;dt+=q;pt[k]+=q}else c+='-'});r+=pad(c,ws[k]+1)});
+    g+=dt;rows.push(r+money(dt));
+  }
+  var foot=pad('Total',5)+S.people.map(function(n,k){return pad(money(pt[k]),ws[k]+1)}).join('')+money(g);
+  return '*Fooody* - '+document.getElementById('cap').textContent+'\n```'+head+'\n'+rows.join('\n')+'\n'+foot+'```';
+}
+document.getElementById('ovx').onclick=closeOv;
+document.getElementById('ov').onclick=function(e){if(e.target===this)closeOv()};
+document.getElementById('ovsave').onclick=function(){
+  if(!shot){fail('Image is still being made. Try again.');return}
+  var name='fooody-'+key(cur)+'.png';
+  var dl=(window.claude&&claude.use)?claude.use('downloads'):Promise.resolve(null);
+  dl.then(function(d){
+    if(d)return d.save({filename:name,data:shot});
+    var a=document.createElement('a');a.href=URL.createObjectURL(shot);a.download=name;document.body.appendChild(a);a.click();a.remove();
+  }).catch(function(err){if(!err||err.code!=='declined')fail('Save is blocked here ('+((err&&(err.code||err.name))||'unknown')+'). Use the WhatsApp text button, or press and hold the image.')});
+};
+document.getElementById('ovshare').onclick=function(){
+  if(!shot){fail('Image is still being made. Try again.');return}
+  var f=new File([shot],'fooody-'+key(cur)+'.png',{type:'image/png'});
+  if(navigator.share&&navigator.canShare&&navigator.canShare({files:[f]})){
+    navigator.share({files:[f],title:'Fooody'}).catch(function(e){if(e&&e.name!=='AbortError')fail('Sharing is blocked here. Use Save, or press and hold the image.')});
+  }else fail('Sharing is not available here. Use Save, or press and hold the image.');
+};
+render();
+</script>
+</body>
+</html>
